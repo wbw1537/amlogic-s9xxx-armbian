@@ -948,6 +948,10 @@ replace_kernel() {
     # 02. For /boot/dtb/${PLATFORM}/*
     [[ -d "${tag_bootfs}/dtb/${PLATFORM}" ]] || mkdir -p ${tag_bootfs}/dtb/${PLATFORM}
     tar -mxzf ${kernel_dtb} -C ${tag_bootfs}/dtb/${PLATFORM}
+    if [[ "${board}" == "tvi3315a" && "${kernel_name}" == 6.18.* ]]; then
+        bash "${different_files}/tvi3315a/apply-device-tree-fixes" "${tag_bootfs}/dtb/${PLATFORM}/${FDTFILE}" ||
+            error_msg "Failed to apply the TVI3315A device-tree fixes."
+    fi
     [[ "${PLATFORM}" == "rockchip" ]] && ln -sf dtb ${tag_bootfs}/dtb-${kernel_name}
     [[ "$(ls ${tag_bootfs}/dtb/${PLATFORM} -l 2>/dev/null | grep "^-" | wc -l)" -ge "2" ]] || error_msg "/boot/dtb/${PLATFORM} files is missing."
 

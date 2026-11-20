@@ -1,0 +1,77 @@
+name: Test TVI3315A Bookworm image
+
+on:
+  push:
+    branches: [codex/tvi3315a-image]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 25
+    env:
+      BASE_IMAGE: Armbian_26.11.0-trunk_bookworm_arm64_6.18.63.img.gz
+      BASE_SHA256: d391cc3ad30479343f23ac76360a2de7f75d760bb461546b3709aaea3bbaea93
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Prepare build tools
+        run: |
+          sudo apt-get -q update
+          sudo apt-get -qy install device-tree-compiler dosfstools e2fsprogs fdisk parted pigz u-boot-tools uuid-runtime
+
+      - name: Download the known Bookworm base image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build/output/images
+          gh release download Armbian_bookworm_arm64_server_2026.11 \
+            --repo "${GITHUB_REPOSITORY}" --pattern "${BASE_IMAGE}" --dir build/output/images
+          cd build/output/images
+          printf '%s  %s\n' "${BASE_SHA256}" "${BASE_IMAGE}" | sha256sum -c -
+          gzip -d "${BASE_IMAGE}"
+
+      - name: Build the TVI3315A image
+        run: sudo ./rebuild -b tvi3315a -k 6.18.63 -a false -u stable -t ext4
+
+      - name: Verify the DTB inside the image
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          images=(build/output/images/Armbian_*_rockchip_tvi3315a_bookworm_6.18.63_*.img.gz)
+          test "${#images[@]}" -eq 1
+
+          stage="$(mktemp -d)"
+          loop=''
+          cleanup() {
+            if mountpoint -q "$stage/boot"; then sudo umount "$stage/boot"; fi
+            if [[ -n "$loop" ]]; then sudo losetup -d "$loop"; fi
+            rm -f -- "$stage/image.img"
+            rmdir -- "$stage/boot" "$stage"
+          }
+          trap cleanup EXIT
+
+          mkdir "$stage/boot"
+          pigz -dc "${images[0]}" > "$stage/image.img"
+          loop="$(sudo losetup --find --show --partscan --read-only "$stage/image.img")"
+          sudo udevadm settle
+          sudo mount -o ro "${loop}p1" "$stage/boot"
+          dtb="$stage/boot/dtb/rockchip/rk3399-tvi3315a.dtb"
+          grep -Fx 'fdtfile=rockchip/rk3399-tvi3315a.dtb' "$stage/boot/armbianEnv.txt"
+          test "$(fdtget -t s "$dtb" /i2c@ff3c0000/pmic@1b clock-output-names)" = 'rk808-clkout1 rk808-clkout2'
+          test "$(fdtget -t s "$dtb" /i2s@ff8a0000 status)" = okay
+          test "$(fdtget -t x "$dtb" /hdmi-sound/simple-audio-card,cpu sound-dai)" = "$(fdtget -t x "$dtb" /i2s@ff8a0000 phandle)"
+          sha256sum "${images[0]}" > "${images[0]}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TVI3315A-Bookworm-6.18.63
+          path: build/output/images/Armbian_*_rockchip_tvi3315a_bookworm_6.18.63_*.img.gz*
+          compression-level: 0
+          if-no-files-found: error

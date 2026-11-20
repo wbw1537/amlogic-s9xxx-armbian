@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+dtb=${1:?Expected the TVI3315A DTB path}
+overlay_source="$(dirname -- "$0")/device-tree-fixes.dts"
+test -f "$dtb" && test ! -L "$dtb"
+test "$(fdtget -t s "$dtb" / compatible)" = 'rockchip,rk3399-tvi3315a rockchip,rk3399'
+
+clock_node=/i2c@ff3c0000/pmic@1b
+i2s_node=/i2s@ff8a0000
+expected_clocks='rk808-clkout1 rk808-clkout2'
+clocks="$(fdtget -t s "$dtb" "$clock_node" clock-output-names)"
+case "$clocks" in
+    'xin32k rk808-clkout2'|"$expected_clocks") ;;
+    *) printf 'Unexpected TVI3315A RK808 clock names: %s\n' "$clocks" >&2; exit 1 ;;
+esac
+test "$(fdtget -t x "$dtb" /hdmi-sound/simple-audio-card,cpu sound-dai)" = "$(fdtget -t x "$dtb" "$i2s_node" phandle)"
+
+stage="$(mktemp -d "$(dirname -- "$dtb")/.tvi3315a-dtb.XXXXXXXX")"
+trap 'rm -f -- "$stage/fixes.dtbo" "$stage/patched.dtb"; rmdir -- "$stage"' EXIT
+dtc -@ -I dts -O dtb -o "$stage/fixes.dtbo" "$overlay_source"
+fdtoverlay -i "$dtb" -o "$stage/patched.dtb" "$stage/fixes.dtbo"
+test "$(fdtget -t s "$stage/patched.dtb" "$clock_node" clock-output-names)" = "$expected_clocks"
+test "$(fdtget -t s "$stage/patched.dtb" "$i2s_node" status)" = okay
+chmod --reference="$dtb" "$stage/patched.dtb"
+mv -f -- "$stage/patched.dtb" "$dtb"
+printf 'Applied TVI3315A RK808 clock and HDMI I2S2 fixes to %s\n' "$dtb"

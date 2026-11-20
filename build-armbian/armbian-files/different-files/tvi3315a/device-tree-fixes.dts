@@ -1,0 +1,20 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    fragment@0 {
+        target-path = "/i2c@ff3c0000/pmic@1b";
+
+        __overlay__ {
+            clock-output-names = "rk808-clkout1", "rk808-clkout2";
+        };
+    };
+
+    fragment@1 {
+        target-path = "/i2s@ff8a0000";
+
+        __overlay__ {
+            status = "okay";
+        };
+    };
+};
